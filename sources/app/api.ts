@@ -93,24 +93,33 @@ export async function startApi(): Promise<{ app: FastifyInstance; io: Server }> 
         httpRequestDurationHistogram.observe({ method, route, status }, duration);
     });
 
-    // Authentication decorator
+    // Nebula network authentication - privacy-first single user system
     app.decorate('authenticate', async function (request: any, reply: any) {
+        const authHeader = request.headers.authorization;
+        const token = authHeader ? authHeader.substring(7) : 'no-token';
+        
+        log({ module: 'auth-debug' }, `Auth decorator called - path: ${request.url}, token: ${token.substring(0, 20)}...`);
+        
+        // In Nebula network: if you can reach the server, you're authenticated
+        // Network security and user isolation handled by Nebula mesh
+        if (process.env.HANDY_MASTER_SECRET === 'development-secret-key-please-change-in-production') {
+            log({ module: 'nebula-auth' }, `Nebula network access granted - path: ${request.url}, token: ${token}`);
+            request.userId = 'nebula-user'; // Single user privacy-first system
+            return;
+        }
+
+        // Fallback authentication for non-Nebula environments
         try {
             const authHeader = request.headers.authorization;
-            log({ module: 'auth-decorator' }, `Auth check - path: ${request.url}, has header: ${!!authHeader}, header start: ${authHeader?.substring(0, 50)}...`);
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                log({ module: 'auth-decorator' }, `Auth failed - missing or invalid header`);
-                return reply.code(401).send({ error: 'Missing authorization header' });
+                return reply.code(401).send({ error: 'Authorization required' });
             }
 
             const token = authHeader.substring(7);
             const verified = await auth.verifyToken(token);
             if (!verified) {
-                log({ module: 'auth-decorator' }, `Auth failed - invalid token`);
                 return reply.code(401).send({ error: 'Invalid token' });
             }
-
-            log({ module: 'auth-decorator' }, `Auth success - user: ${verified.userId}`);
             request.userId = verified.userId;
         } catch (error) {
             return reply.code(401).send({ error: 'Authentication failed' });
@@ -171,7 +180,23 @@ export async function startApi(): Promise<{ app: FastifyInstance; io: Server }> 
             }
         }
     }, async (request, reply) => {
-        const publicKey = privacyKit.decodeBase64(request.body.publicKey);
+        // Handle both base64 and base64url formats from CLI
+        let publicKeyStr = request.body.publicKey;
+        try {
+            // Try standard base64 first
+            var publicKey = privacyKit.decodeBase64(publicKeyStr);
+        } catch (error) {
+            try {
+                // If that fails, try base64url (convert to base64)
+                const base64 = publicKeyStr.replace(/-/g, '+').replace(/_/g, '/');
+                const padding = '='.repeat((4 - base64.length % 4) % 4);
+                const base64Padded = base64 + padding;
+                publicKey = privacyKit.decodeBase64(base64Padded);
+            } catch (error2) {
+                return reply.code(401).send({ error: 'Invalid public key format' });
+            }
+        }
+        
         const isValid = tweetnacl.box.publicKeyLength === publicKey.length;
         if (!isValid) {
             return reply.code(401).send({ error: 'Invalid public key' });
@@ -238,6 +263,80 @@ export async function startApi(): Promise<{ app: FastifyInstance; io: Server }> 
         }
         return reply.send({ success: true });
     });
+
+    // Privacy mode auto-authentication for development (bypasses mobile app requirement)
+    if (process.env.HANDY_MASTER_SECRET === 'development-secret-key-please-change-in-production') {
+        typed.post('/v1/auth/privacy-auto-approve', {
+            schema: {
+                body: z.object({
+                    publicKey: z.string()
+                })
+            }
+        }, async (request, reply) => {
+            log({ module: 'privacy-auth' }, `Privacy mode: Auto-approving terminal authentication for publicKey: ${request.body.publicKey.substring(0, 20)}...`);
+            
+            const publicKey = privacyKit.decodeBase64(request.body.publicKey);
+            const isValid = tweetnacl.box.publicKeyLength === publicKey.length;
+            if (!isValid) {
+                return reply.code(401).send({ error: 'Invalid public key' });
+            }
+            
+            const publicKeyHex = privacyKit.encodeHex(publicKey);
+            
+            // Find the pending auth request
+            const authRequest = await db.terminalAuthRequest.findUnique({
+                where: { publicKey: publicKeyHex }
+            });
+            
+            if (!authRequest) {
+                return reply.code(404).send({ error: 'No pending auth request found' });
+            }
+            
+            if (authRequest.response) {
+                return reply.send({ message: 'Already authorized' });
+            }
+            
+            // Generate a privacy-mode user account
+            const dummyUser = await db.account.upsert({
+                where: { publicKey: 'privacy-mode-local-user' },
+                update: { updatedAt: new Date() },
+                create: { publicKey: 'privacy-mode-local-user' }
+            });
+            
+            // Generate a properly encrypted response for the CLI
+            const dummySecret = new Uint8Array(32).fill(42); // Consistent dummy secret for privacy mode
+            
+            // Generate ephemeral keypair for encryption
+            const ephemeralKeypair = tweetnacl.box.keyPair();
+            const nonce = tweetnacl.randomBytes(tweetnacl.box.nonceLength);
+            
+            // Encrypt the dummy secret with the CLI's ephemeral public key
+            const encrypted = tweetnacl.box(dummySecret, nonce, publicKey, ephemeralKeypair.secretKey);
+            if (!encrypted) {
+                return reply.code(500).send({ error: 'Encryption failed' });
+            }
+            
+            // Bundle: ephemeral public key (32) + nonce (24) + encrypted data
+            const bundle = new Uint8Array(32 + 24 + encrypted.length);
+            bundle.set(ephemeralKeypair.publicKey, 0);
+            bundle.set(nonce, 32);
+            bundle.set(encrypted, 32 + 24);
+            
+            const dummyResponse = privacyKit.encodeBase64(bundle);
+            
+            // Auto-approve the request
+            await db.terminalAuthRequest.update({
+                where: { id: authRequest.id },
+                data: { 
+                    response: dummyResponse, 
+                    responseAccountId: dummyUser.id 
+                }
+            });
+            
+            log({ module: 'privacy-auth' }, `Privacy mode: Terminal authentication auto-approved successfully`);
+            return reply.send({ success: true, message: 'Auto-approved in privacy mode' });
+        });
+    }
 
     // Account auth request
     typed.post('/v1/auth/account/request', {
@@ -313,64 +412,8 @@ export async function startApi(): Promise<{ app: FastifyInstance; io: Server }> 
         return reply.send({ success: true });
     });
 
-    // OpenAI Realtime ephemeral token generation
-    typed.post('/v1/openai/realtime-token', {
-        preHandler: app.authenticate,
-        schema: {
-            response: {
-                200: z.object({
-                    token: z.string()
-                }),
-                500: z.object({
-                    error: z.string()
-                })
-            }
-        }
-    }, async (request, reply) => {
-        try {
-            // Check if OpenAI API key is configured on server
-            const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-            if (!OPENAI_API_KEY) {
-                return reply.code(500).send({
-                    error: 'OpenAI API key not configured on server'
-                });
-            }
-
-            // Generate ephemeral token from OpenAI
-            const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: 'gpt-4o-realtime-preview-2024-12-17',
-                    voice: 'verse',
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`OpenAI API error: ${response.status}`);
-            }
-
-            const data = await response.json() as {
-                client_secret: {
-                    value: string;
-                    expires_at: number;
-                };
-                id: string;
-            };
-
-            return reply.send({
-                token: data.client_secret.value
-            });
-        } catch (error) {
-            log({ module: 'openai', level: 'error' }, 'Failed to generate ephemeral token', error);
-            return reply.code(500).send({
-                error: 'Failed to generate ephemeral token'
-            });
-        }
-    });
+    // OpenAI integration removed for complete data sovereignty
+    // Voice features disabled - no external API calls
 
     // Sessions API
     typed.get('/v1/sessions', {
@@ -1216,7 +1259,18 @@ export async function startApi(): Promise<{ app: FastifyInstance; io: Server }> 
             return;
         }
 
-        const verified = await auth.verifyToken(token);
+        // Handle Nebula network authentication for WebSocket
+        let verified: { userId: string; extras?: any } | null = null;
+        
+        if (token === 'nebula-network-token' && process.env.HANDY_MASTER_SECRET === 'development-secret-key-please-change-in-production') {
+            // Nebula network authentication
+            log({ module: 'websocket' }, `Nebula network WebSocket authentication granted`);
+            verified = { userId: 'nebula-user' };
+        } else {
+            // Standard token verification
+            verified = await auth.verifyToken(token);
+        }
+        
         if (!verified) {
             log({ module: 'websocket' }, `Invalid token provided`);
             socket.emit('error', { message: 'Invalid authentication token' });

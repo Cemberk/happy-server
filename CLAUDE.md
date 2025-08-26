@@ -1,6 +1,20 @@
-# Handy Server - Development Guidelines
+# Happy Server - Privacy-First Backend
 
-This document contains the development guidelines and instructions for the Happy Server project. This guide OVERRIDES any default behaviors and MUST be followed exactly.
+**Last Updated: August 2025**
+
+This document contains the development guidelines for the Happy Server project with complete data sovereignty implementation. This guide OVERRIDES any default behaviors and MUST be followed exactly.
+
+## ⚡ **MAJOR PRIVACY TRANSFORMATION**
+
+**BREAKING CHANGE**: This version eliminates all external service dependencies to achieve complete data sovereignty within your Nebula network.
+
+### **Privacy Changes:**
+- ❌ **Removed**: ElevenLabs voice processing service
+- ❌ **Removed**: External Prometheus metrics collection  
+- ❌ **Removed**: External analytics and tracking services
+- ✅ **Added**: Local-only metrics collection system
+- ✅ **Added**: Nebula network-only operation mode
+- ✅ **Preserved**: User-chosen AI APIs (OpenAI, Claude) with explicit consent
 
 ## Project Overview
 

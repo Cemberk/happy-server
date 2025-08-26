@@ -24,8 +24,9 @@ class ActivityCache {
     // Cache TTL (30 seconds)
     private readonly CACHE_TTL = 30 * 1000;
     
-    // Only update DB if time difference is significant (30 seconds)
-    private readonly UPDATE_THRESHOLD = 30 * 1000;
+    // Only update DB if time difference is significant (5 seconds)
+    // This ensures shorter CLI sessions get marked as active
+    private readonly UPDATE_THRESHOLD = 5 * 1000;
     
     // Batch update interval (5 seconds)
     private readonly BATCH_INTERVAL = 5 * 1000;

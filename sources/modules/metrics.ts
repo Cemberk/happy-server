@@ -1,72 +1,77 @@
-import { register, Counter, Gauge, Histogram } from 'prom-client';
+// Re-export local-only metrics system for complete data sovereignty
+export {
+    LocalCounter as Counter,
+    LocalGauge as Gauge,
+    LocalHistogram as Histogram,
+    register,
+    getLocalMetricsRegistry,
+    exportPrometheusFormat
+} from './localMetrics';
+
 import { db } from '@/storage/db';
 import { forever } from '@/utils/forever';
 import { delay } from '@/utils/delay';
 import { shutdownSignal } from '@/utils/shutdown';
+import {
+    LocalCounter,
+    LocalGauge,
+    LocalHistogram,
+    register
+} from './localMetrics';
 
-// Application metrics
-export const websocketConnectionsGauge = new Gauge({
-    name: 'websocket_connections_total',
-    help: 'Number of active WebSocket connections',
-    labelNames: ['type'] as const,
-    registers: [register]
-});
+// Application metrics - now using local-only system
+export const websocketConnectionsGauge = new LocalGauge(
+    'websocket_connections_total',
+    'Number of active WebSocket connections',
+    ['type']
+);
 
-export const sessionAliveEventsCounter = new Counter({
-    name: 'session_alive_events_total',
-    help: 'Total number of session-alive events',
-    registers: [register]
-});
+export const sessionAliveEventsCounter = new LocalCounter(
+    'session_alive_events_total',
+    'Total number of session-alive events'
+);
 
-export const machineAliveEventsCounter = new Counter({
-    name: 'machine_alive_events_total',
-    help: 'Total number of machine-alive events',
-    registers: [register]
-});
+export const machineAliveEventsCounter = new LocalCounter(
+    'machine_alive_events_total',
+    'Total number of machine-alive events'
+);
 
-export const sessionCacheCounter = new Counter({
-    name: 'session_cache_operations_total',
-    help: 'Total session cache operations',
-    labelNames: ['operation', 'result'] as const,
-    registers: [register]
-});
+export const sessionCacheCounter = new LocalCounter(
+    'session_cache_operations_total',
+    'Total session cache operations',
+    ['operation', 'result']
+);
 
-export const databaseUpdatesSkippedCounter = new Counter({
-    name: 'database_updates_skipped_total',
-    help: 'Number of database updates skipped due to debouncing',
-    labelNames: ['type'] as const,
-    registers: [register]
-});
+export const databaseUpdatesSkippedCounter = new LocalCounter(
+    'database_updates_skipped_total',
+    'Number of database updates skipped due to debouncing',
+    ['type']
+);
 
-export const websocketEventsCounter = new Counter({
-    name: 'websocket_events_total',
-    help: 'Total WebSocket events received by type',
-    labelNames: ['event_type'] as const,
-    registers: [register]
-});
+export const websocketEventsCounter = new LocalCounter(
+    'websocket_events_total',
+    'Total WebSocket events received by type',
+    ['event_type']
+);
 
-export const httpRequestsCounter = new Counter({
-    name: 'http_requests_total',
-    help: 'Total number of HTTP requests',
-    labelNames: ['method', 'route', 'status'] as const,
-    registers: [register]
-});
+export const httpRequestsCounter = new LocalCounter(
+    'http_requests_total',
+    'Total number of HTTP requests',
+    ['method', 'route', 'status']
+);
 
-export const httpRequestDurationHistogram = new Histogram({
-    name: 'http_request_duration_seconds',
-    help: 'HTTP request duration in seconds',
-    labelNames: ['method', 'route', 'status'] as const,
-    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
-    registers: [register]
-});
+export const httpRequestDurationHistogram = new LocalHistogram(
+    'http_request_duration_seconds',
+    'HTTP request duration in seconds',
+    ['method', 'route', 'status'],
+    [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10]
+);
 
-// Database count metrics
-export const databaseRecordCountGauge = new Gauge({
-    name: 'database_records_total',
-    help: 'Total number of records in database tables',
-    labelNames: ['table'] as const,
-    registers: [register]
-});
+export const databaseRecordCountGauge = new LocalGauge(
+    'database_records_total',
+    'Total number of records in database tables',
+    ['table']
+);
 
 // WebSocket connection tracking
 const connectionCounts = {
@@ -111,5 +116,4 @@ export function startDatabaseMetricsUpdater(): void {
     });
 }
 
-// Export the register for combining metrics
-export { register };
+// register is already exported at the top of the file

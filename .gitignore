@@ -9,3 +9,5 @@ dist
 .logs/
 
 .claude/
+
+server.log

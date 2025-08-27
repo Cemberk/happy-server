@@ -48,6 +48,7 @@
     "privacy-kit": "^0.0.23",
     "socket.io": "^4.8.1",
     "socket.io-adapter": "^2.5.5",
+    "socket.io-client": "^4.8.1",
     "tmp": "^0.2.3",
     "tsx": "^4.19.2",
     "tweetnacl": "^1.0.3",
